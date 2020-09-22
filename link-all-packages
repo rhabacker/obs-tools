@@ -1,0 +1,5 @@
+for i in $(osc ls KDE:Frameworks5 | grep -v sddm | grep -v kwin5); do
+    if ! test -d "mingw32-$i"; then
+        ./linkpac $i
+    fi
+done

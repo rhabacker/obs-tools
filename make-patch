@@ -1,0 +1,5 @@
+#!/bin/sh
+
+for i in $(find -name '*.orig' | sed 's,.orig,,g'); do
+    diff -ubB $i.orig $i
+done

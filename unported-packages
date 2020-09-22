@@ -1,0 +1,3 @@
+#!/bin/sh
+
+for i in $(find -maxdepth 2 -name '*.spec'); do o=$(grep -Hn mingw32 $i); if test -z "$o"; then echo $i; fi; done

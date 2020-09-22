@@ -1,0 +1,286 @@
+#!/usr/bin/python3
+import sys
+
+# todo frameworkintegration; %if 0%{?suse_version} >= 1330 || (0%{?sle_version} >= 120200 && 0%{?is_opensuse})
+
+target = "mingw32"
+
+def getBuildDep(b):
+    return "BuildRequires:  %s" % b
+
+crosspkg = [ "gcc", "gcc-c++" ]
+nativepkg = [
+    "autoconf", "automake", "libtool",
+    "bison", "cmake", "dos2unix", "doxygen", "flex", "gettext", "gperf", "graphviz",
+    "meson", "perl", "xsltproc",  "python3-sphinx", "perl-URI", "python", "python3",
+    "unzip",
+    "update-desktop-files", "xz"
+]
+
+ignorepkg = [
+    "alsa", "atk","libQt5X11Extras5", "libxcb-devel", "Qt5X11Extras", "pam-devel", "sm",
+    "pciutils-devel", "usbutils", "valgrind-devel",
+    "utempter-devel", "/usr/bin/Xvfb", "xvfb-run",
+    "x11", "xcomposite", "xdamage", "xi", "xrandr", "xt", "xtst", "xcb", "xcursor",
+    "xcb-keysyms", "xext", "xfixes", "xrender", "xscrnsaver"
+]
+
+removepkg = [ "fdupes" ]
+
+renamepkg = {
+    "libboost_headers-devel" : "mingw32-boost-devel",
+    "xvfb-run" : "mingw32-cross-wine",
+    "kdeedu-data" : "%s-kdeedu5-data" % target,
+}
+
+ntags = [
+    "%package", "%description", "%post", "%postun", "%files", "%lang_package"
+]
+
+paths = [
+    "%{_bindir}", "%{_docdir}", "%{_libdir}", "%{_sysconfdir}", "%{_datadir}",
+    "%{_includedir}", "%{_mandir}", "%{_libqt5", "%{_kf5"
+]
+
+gotCrossPackages = []
+
+def isCrossPackage(a):
+    global crosspkg
+    for i in crosspkg:
+        if i in a:
+            return True
+    return False
+
+def replaceCrossPackage(a, l):
+    global gotCrossPackages
+    gotCrossPackages.append(a)
+    return l.replace(a, "%s-cross-%s" % (target, a))
+
+def hasPathDef(a):
+    global paths
+    for i in paths:
+        if i in a:
+            return True
+    return False
+
+def replacePath(a):
+    return a.replace("%{_", "%%{_%s_" % target, 1)
+
+def isSharedLibrary(a):
+    s = "_libdir}"
+    return s in a and ".so." in a
+
+def replaceSharedLibrary(a):
+    s = "_libdir}"
+    a = a.replace(s, "_bindir}", 1)
+    n = a.find(".so.")
+    v = a[n+5:]
+    a = "%s%s.dll" % (a[:n], v)
+    return a
+
+def isPluginLibrary(a):
+    s = "_plugindir}"
+    return s in a and ".so" in a
+
+def replacePluginLibrary(a):
+    a = a.replace(".so", ".dll", 1)
+    return a
+
+def isImportLibrary(a):
+    s = "_libdir}"
+    return s in a and a.endswith(".so")
+
+def replaceImportLibrary(a):
+    return a.replace(".so", ".dll.a")
+
+def isExecutable(a):
+    s = "_bindir}"
+    s2 = "_libexecdir}"
+    return (s in a or s2 in a) and not ".so" in a
+
+def replaceExecutable(a):
+    return "%s.exe" % a
+
+def isMetaPkg(a):
+    return "pkgconfig(" in a or "cmake(" in a or "lib(" in a
+
+def replaceMetaPkg(a,l):
+    if "pkgconfig(" in a:
+        s = a.replace("pkgconfig(", "").replace(")", "")
+        if s in ignorepkg:
+            l = "# %s" % l
+        elif "bzip2" in a:
+            l = l.replace("pkgconfig(", "%s(lib:" % target)
+        else:
+            l = l.replace("pkgconfig(", "%s(pkg:" % target)
+    elif "cmake(" in a:
+        s = a.replace("cmake(", "").replace(")", "")
+        if s in ignorepkg:
+            l = "# %s" % l
+        else:
+            l = l.replace("cmake(", "%s(cmake:" % target)
+    elif "lib(" in a:
+        l = l.replace("lib(", "%s(lib:" % target)
+    return l
+
+def appendIf(l, a, b):
+    c = "%s%s" % (a, b)
+    if a in l and not c in l:
+       return l.replace(a, c)
+    else:
+       return l
+
+def prependIf(l, a, b):
+    c = "%s%s" % (b, a)
+    if a in l and not c in l:
+       return l.replace(a, c)
+    else:
+       return l
+
+def replaceIf(l, a, b):
+    if a in l and not b in l:
+       return l.replace(a, b)
+    else:
+       return l
+
+firstDescription = True
+inFileSection = False
+firstRequires = True
+
+with open(sys.argv[1]) as f:
+    lines = f.read().splitlines()
+    nlines = len(lines)
+    for nr in range(0, nlines):
+        #print(l)
+        l = lines[nr];
+        if nr < nlines - 1:
+            lnext = lines[nr+1]
+        else:
+            lnext = ""
+        if nr > 0:
+            lprev = lines[nr-1]
+        else:
+            lprev = ""
+        c = l.split()
+        sc = len(c)
+        if "%prep" in lnext:
+            print()
+            print("%%_%s_debug_package" % target)
+        elif firstDescription and "%description" in lnext:
+            print("%%_%s_package_header_debug" % target)
+            print("BuildArch:      noarch")
+            firstDescription = False
+        if "cmake_kf5" in l and "-Dlconvert_executable" in l:
+            p = l.find("-Dlconvert_executable")
+            l = l[:p-1]
+        if sc == 0:
+            print(l)
+            continue
+        c0 = c[0]
+        if sc > 1:
+            c1 = c[1]
+        else:
+            c1 = ""
+        if "spec file for package %s" % target in l:
+            print("This file has already be ported")
+            exit(1)
+        if "%{_kf5_libdir}/libkdeinit5" in l:
+            continue
+        l = appendIf(l, "spec file for package ", "%s-" % target)
+        l = prependIf(l, "_kf5_version", "_%s" % target)
+        l = prependIf(l, "_kf5_bugfix_version", "_%s" % target)
+        l = prependIf(l, "python3_sitelib}", "_%s_" % target)
+        l = prependIf(l, "icon_theme_cache", "_%s_" % target)
+        l = replaceIf(l, "xvfb-run -a", "%_mingw32_cross_wine_run")
+        l = replaceIf(l, "%qmake5", "%%_%s_qmake5" % target)
+        l = replaceIf(l, "%cmake", "%%_%s_cmake" % target)
+        l = replaceIf(l, "%configure", "%%_%s_configure" % target)
+        l = replaceIf(l, "%cmake_kf5", "%%_%s_cmake_kf5" % target)
+        l = replaceIf(l, "%kf5_makeinstall", "%%_%s_kf5_makeinstall" % target)
+        l = replaceIf(l, "%{kf5_find_lang}", "%%_%s_kf5_find_lang %%{_name}" % target)
+        l = replaceIf(l, "%{kf5_find_htmldocs}", "%%_%s_kf5_find_htmldocs %%{_name}" % target)
+        if c0 == "Name:" and not "_name" in lprev:
+            print("%%define _name   %s" % c1)
+            l = "Name:           %s-%%{_name}" % target
+        elif "Source" in c0 and "%{name" in l:
+            l = l.replace("%{name}", "%{_name}")
+        elif "Source" in c0 and c1 == "baselibs.conf":
+            continue
+        elif c0 == "BuildRequires:" and not target in c1:
+            if c1 in removepkg:
+                continue
+            elif c1 in renamepkg.keys():
+                l = l.replace(c1, renamepkg[c1])
+            elif c1 in ignorepkg:
+                l = l.replace(l, "# %s" % l)
+            elif isCrossPackage(c1):
+                continue
+            elif c1 in nativepkg:
+                print(l)
+                if "cmake" in c1:
+                    print(getBuildDep("%s-cross-gcc-c++" % target))
+                    gotCrossPackages.append("gcc-c++")
+                continue
+            elif isMetaPkg(c1):
+                if c1 in ignorepkg:
+                    l = "# %s" % l
+                else:
+                    l = replaceMetaPkg(c1, l)
+            elif c1 == "pkgconfig":
+                l = getBuildDep("%s-cross-pkgconf" % target)
+            else:
+                l = l.replace(c1, "%s-%s" % (target, c1))
+        elif c0 == "Requires:" and not c1.startswith("%{name}"):
+            if isCrossPackage(c1):
+                l = replaceCrossPackage(c1, l)
+            elif c1 in nativepkg or c1 == "%{name}":
+                a=10
+            elif isMetaPkg(c1):
+                if c1 in ignorepkg:
+                    l = "# %s" % l
+                else:
+                    l = replaceMetaPkg(c1, l)
+            else:
+                l = l.replace(c1, "%s-%s" % (target, c1))
+        elif c0 == "Provides:" or c0 == "Obsoletes:" or c0 == "Conflicts:" or c0 ==  "Recommends:":
+            if c1 in renamepkg.keys():
+                l = l.replace(c1, renamepkg[c1])
+            elif not c1.startswith("%{name}"):
+                l = l.replace(c1, "%s-%s" % (target, c1))
+        elif sc > 1 and c0 in ntags:
+            if "/sbin/ldconfig" in l:
+                continue
+            elif c1 == "-n":
+                l = l.replace("-n ", "-n %s-" % target)
+        elif hasPathDef(l):
+            l = replacePath(l)
+        if isSharedLibrary(l):
+            l = replaceSharedLibrary(l)
+        elif isImportLibrary(l):
+            l = replaceImportLibrary(l)
+        elif isPluginLibrary(l):
+            l = replacePluginLibrary(l)
+        elif isExecutable(l):
+            l = replaceExecutable(l)
+        elif "%requires_ge" in l and not c1.startswith("%"):
+            if c1 in ignorepkg:
+                l = "# %s" % l
+            else:
+                l = l.replace(c1, "%s-%s" % (target, c1))
+        elif "%requires_eq" in l and not c1.startswith("%{"):
+            l = l.replace(c1, "%s-%s" % (target, c1))
+        elif (c0 == "%setup" or c0 == "%autosetup") and not "-n" in l:
+            l = "%s -n %%{_name}-%%{version}" % l
+        elif c0 == "%find_lang":
+            l = l.replace("%find_lang", "%_mingw32_find_lang")
+            if "%{name}" in l:
+                l = l.replace("%{name}", "%{_name}")
+        elif c0 == "%fdupes":
+            continue
+        #l = replaceIf(l, "%{name}5", "%{_name}5")
+        if "%files" in c0 and "lang" in l:
+            l = l.replace("%{name}", "%{_name}")
+        if "%lang_package" in c0 and "%{name}" in l:
+            l = l.replace("%{name}", "%{_name}")
+        print(l)
+

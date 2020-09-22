@@ -1,0 +1,5 @@
+#!/bin/sh
+
+rev=$(osc log --csv  openSUSE:Factory/$1  | grep "5\.65" | sed 's,|.*$,,g' | head -1)
+osc branch -r $rev openSUSE:Factory $1 home:rhabacker:branches:windows:mingw:win32:KF565 mingw32-$1
+

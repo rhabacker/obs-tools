@@ -1,0 +1,13 @@
+#!/bin/sh
+
+d=$(realpath $0)
+d=$(dirname $d)
+
+$d/patch-mingw32 mingw32-$1/*.spec > tmp
+if test -n "$DISPLAY"; then
+    kdiff3 mingw32-$1/*.spec  tmp &
+else
+    less tmp
+fi
+
+

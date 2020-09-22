@@ -1,0 +1,3 @@
+#!/bin/sh
+
+find $PWD -maxdepth 1 -executable -type f ! -name install -exec ln -fs {} ~/bin \;
