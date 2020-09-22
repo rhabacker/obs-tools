@@ -1,0 +1,8 @@
+export XDG_CONFIG_DIRS=
+export XDG_DATA_DIRS=
+export XDG_RUNTIME_DIR=
+for i in $(/usr/i686-w64-mingw32/sys-root/mingw/bin/kf5-config.exe  --help | grep qsp | gawk '{ print $1}'); do
+    for j in $(/usr/i686-w64-mingw32/sys-root/mingw/bin/kf5-config.exe $i); do
+        echo $i $j
+    done
+done
