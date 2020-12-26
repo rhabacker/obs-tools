@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# copy all packages from a source project to a destination project
+#
+# @author Ralf Habacker <ralf.habacker@freenet.de>
+#
+
+src=$1
+dest=$2
+ver=$3
+osc="osc"
+
+if test -z "$1" || test -z "$2" || test -z "$3"; then
+    echo $0 <source> <dest> <version-for-commit-message>
+    exit 1
+fi
+
+for i in $(osc prjresults -b  -V $src | grep 15.1 | grep -v disabled | gawk '{ print $1 }')
+do
+     $osc ls $dest/$i >/dev/null 2>&1
+     if test $? -eq 0; then
+        continue
+     fi 
+     $osc copypac  -m "update to $ver" $src $i $dest
+done
