@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# create a complete mingw64 project from a given mingw32 project
+#
+# @author Ralf Habacker <ralf.habacker@freenet.de>
+#
+
+root=~/osc
+src=$1
+dest=$2
+
+for i in $(osc ls $src); do
+    p=$(echo $i | sed 's,mingw32,mingw64,g')
+    cd $root/$dest
+    if test -d $p; then
+        continue;
+    fi
+    osc mkpac $p
+    (
+        cd $p
+        for j in $(osc ls $src $i | grep -v _link | grep -v '#'); do
+            cp $root/$src/$i/$j $root/$dest/$p
+        done
+        for j in $(find -type f -name 'mingw32-*'); do
+           o=$(echo $j | sed 's,mingw32,mingw64,g')
+           mv $j $o
+        done
+        sed -i 's,mingw32,mingw64,g;s,MINGW32,MINGW64,g' *.spec
+        osc add *
+        #osc ci -m "port to mingw64"
+    )
+done
