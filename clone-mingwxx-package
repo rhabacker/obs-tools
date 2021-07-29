@@ -1,0 +1,57 @@
+#!/bin/sh
+#
+# @author Ralf Habacker
+#
+# clone a mingw package to the other architecture e.g mingw32->mingw64 and vice versa
+#
+srcprj=$1
+srcpkg=$2
+
+if test -z "$1" || test -z "$2"; then
+    echo "$0 <source project> <source package>"
+    exit 1
+fi
+
+# set search patterns
+srcpat=32
+dstpat=64
+if ! [[ $srcpkg =~ "32" ]]; then
+    srcpat=64
+    dstpat=32
+fi
+
+# create names for destination
+dstprj=$(echo $srcprj | sed "s,$srcpat,$dstpat,g")
+dstpkg=$(echo $srcpkg | sed "s,mingw$srcpat,mingw$dstpat,g")
+
+# copy package to destination
+osc copypac $1 $2 $dstprj $dstpkg
+if test "$?" -ne 0; then
+    echo "package exists"
+    exit 1
+fi
+
+# checkout package
+cd /tmp
+osc co $dstprj/$dstpkg
+cd $dstprj/$dstpkg
+
+rpl="s,mingw$srcpat,mingw$dstpat,g;s,MINGW$srcpat,MINGW$dstpat,g"
+
+# update file names and content
+if test -f "$srcpkg.changes"; then
+    osc mv $srcpkg.changes $dstpkg.changes
+    sed -i $rpl $dstpkg.changes
+fi
+osc mv $srcpkg.spec $dstpkg.spec
+sed -i $rpl $dstpkg.spec
+
+# check in applied changes
+osc ci -m "ported to mingw$dstpat"
+if test "$?" -ne 0; then
+    echo "commit failed"
+    exit 1
+fi
+
+# cleanup
+rm -rf $dstprj
