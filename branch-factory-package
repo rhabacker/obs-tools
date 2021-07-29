@@ -1,0 +1,14 @@
+#!/bin/sh
+
+#
+# @ author Ralf Habacker
+#
+# branch a factory package to windows:mingw
+
+if test -z "$1"; then
+    echo "$0 <package> <version>"
+    exit 1
+fi
+
+rev=$(osc log openSUSE:Factory/$1 | grep $2 | head -1 | sed 's,|.*$,,g;s,r,,g')
+osc branch -r $rev openSUSE:Factory/$1 windows:mingw
