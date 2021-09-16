@@ -1,0 +1,5 @@
+#!/bin/sh
+
+find -maxdepth 2 -type f -name '_service' -exec grep -Hn format {} \;
+find -maxdepth 2 -type f -name '_service' -exec sed -i 's,\.%cd\.git+,+%cd+git.,g' {} \;
+find -maxdepth 2 -type f -name '_service' -exec grep -Hn format {} \;
