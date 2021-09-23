@@ -39,7 +39,9 @@ ntags = [
 
 paths = [
     "%{_bindir}", "%{_docdir}", "%{_libdir}", "%{_sysconfdir}", "%{_datadir}",
-    "%{_includedir}", "%{_mandir}", "%{_libqt5", "%{_kf5"
+    "%{_includedir}", "%{_mandir}", "%{_libqt5", "%{_kf5",
+    "%_bindir", "%_docdir", "%_libdir", "%_sysconfdir", "%_datadir",
+    "%_includedir", "%_mandir"
 ]
 
 gotCrossPackages = []
@@ -64,39 +66,48 @@ def hasPathDef(a):
     return False
 
 def replacePath(a):
+    # TODO
+    a = a.replace("%_", "%%_%s_" % target, 1)
     return a.replace("%{_", "%%{_%s_" % target, 1)
 
 def isSharedLibrary(a):
-    s = "_libdir}"
-    return s in a and ".so." in a
+    s1 = "_libdir}"
+    s2 = "_libdir/"
+    return (s1 in a or s2 in a) and ".so." in a
 
 def replaceSharedLibrary(a):
     s = "_libdir}"
     a = a.replace(s, "_bindir}", 1)
+    s = "_libdir/"
+    a = a.replace(s, "_bindir/", 1)
     n = a.find(".so.")
     v = a[n+5:]
     a = "%s%s.dll" % (a[:n], v)
     return a
 
 def isPluginLibrary(a):
-    s = "_plugindir}"
-    return s in a and ".so" in a
+    s1 = "_plugindir}"
+    s2 = "_plugindir/"
+    return (s1 in a or s2 in a) and ".so" in a
 
 def replacePluginLibrary(a):
     a = a.replace(".so", ".dll", 1)
     return a
 
 def isImportLibrary(a):
-    s = "_libdir}"
-    return s in a and a.endswith(".so")
+    s1 = "_libdir}"
+    s2 = "_libdir/"
+    return (s1 in a or s2 in a) and a.endswith(".so")
 
 def replaceImportLibrary(a):
     return a.replace(".so", ".dll.a")
 
 def isExecutable(a):
-    s = "_bindir}"
-    s2 = "_libexecdir}"
-    return (s in a or s2 in a) and not ".so" in a
+    s1 = "_bindir}"
+    s2 = "_bindir/"
+    s3 = "_libexecdir}"
+    s4 = "_libexecdir/"
+    return (s1 in a or s2 in a or s3 in a or s4 in a) and not ".so" in a
 
 def replaceExecutable(a):
     return "%s.exe" % a
