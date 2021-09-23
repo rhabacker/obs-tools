@@ -1,9 +1,10 @@
+
 prj=windows:mingw
 for i in $(osc ls $prj | grep "\-17"); do
     #osc meta pkg $prj  $i > $i.xml
     #gawk -f patch.awk $i.xml  > $i.new
     #osc meta pkg $prj $i -F $i.new
-    osc wipebinaries -r openSUSE_Tumbleweed $prj $i
-    osc wipebinaries -r openSUSE_Tumbleweed_ARM $prj $i
-    osc wipebinaries -r openSUSE_Tumbleweed_PowerPC $prj $i
+    osc wipebinaries --all -r openSUSE_Tumbleweed $prj $i
+    osc wipebinaries --all -r openSUSE_Tumbleweed_ARM $prj $i
+    osc wipebinaries --all -r openSUSE_Tumbleweed_PowerPC $prj $i
 done
