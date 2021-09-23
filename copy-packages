@@ -11,11 +11,11 @@ ver=$3
 osc="osc"
 
 if test -z "$1" || test -z "$2" || test -z "$3"; then
-    echo $0 <source> <dest> <version-for-commit-message>
+    echo "$0 <source> <dest> <version-for-commit-message>"
     exit 1
 fi
 
-for i in $(osc prjresults -b  -V $src | grep 15.1 | grep -v disabled | gawk '{ print $1 }')
+for i in $(osc prjresults -b  -V $src | grep 15.2 | grep -v disabled | gawk '{ print $1 }')
 do
      $osc ls $dest/$i >/dev/null 2>&1
      if test $? -eq 0; then
