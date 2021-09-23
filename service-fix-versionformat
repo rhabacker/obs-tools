@@ -1,5 +1,7 @@
 #!/bin/sh
-
+echo "---- before ----"
 find -maxdepth 2 -type f -name '_service' -exec grep -Hn format {} \;
 find -maxdepth 2 -type f -name '_service' -exec sed -i 's,\.%cd\.git+,+%cd+git.,g' {} \;
+find -maxdepth 2 -type f -name '_service' -exec sed -i '/[0-9]\.%h/ s,\.%h,+%cd+git.%h,g' {} \;
+echo "---- after ----"
 find -maxdepth 2 -type f -name '_service' -exec grep -Hn format {} \;
