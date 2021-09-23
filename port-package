@@ -1,8 +1,19 @@
 #!/bin/sh
-
+#
+# @author Ralf Habacker
+#
+# port native package to mingw32
+#
 d=$(realpath $0)
 d=$(dirname $d)
 
-$d/patch-mingw32 mingw32-$1/*.spec > tmp
-cp tmp mingw32-$1/*.spec
-osc ci -m "port to mingw32" mingw32-$1/
+(
+    cd mingw32-$1
+    osc mv $1.spec mingw32-$1.spec
+    if test -f $1.changes; then
+        osc mv $1.changes mingw32-$1.changes
+    fi
+    $d/patch-mingw32 $1.spec > tmp
+    mv tmp mingw32-$1.spec
+    echo "osc ci -m \"port to mingw32\""
+)
