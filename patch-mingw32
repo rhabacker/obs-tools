@@ -39,7 +39,7 @@ ntags = [
 
 paths = [
     "%{_bindir}", "%{_docdir}", "%{_libdir}", "%{_sysconfdir}", "%{_datadir}",
-    "%{_includedir}", "%{_mandir}", "%{_libqt5", "%{_kf5",
+    "%{_includedir}", "%{_mandir}", "%{_libqt5", "%{_kf5", "%{_qt6", "%{qt6"
     "%_bindir", "%_docdir", "%_libdir", "%_sysconfdir", "%_datadir",
     "%_includedir", "%_mandir"
 ]
