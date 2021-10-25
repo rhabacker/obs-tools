@@ -1,0 +1,19 @@
+
+root=~/osc
+src=X11:Wayland
+prefix=mingw64
+dest=home:rhabacker:branches:games:$prefix
+
+for i in $(osc ls $src | grep vulkan); do
+    srcpkg=$root/$src/$i
+    destpkg=$root/$dest/$prefix-$i
+    version=$(gawk '$1 ~ /Version:/ { print $2 }' $srcpkg/$i.spec)
+    oldversion=$(gawk '$1 ~ /Version:/ { print $2 }' $destpkg/$prefix-$i.spec)
+    (cd $srcpkg; osc update)
+    (cd $destpkg; osc update)
+    (cd $destpkg; osc rm *$oldversion*.gz)
+    cp $i/*$version*.tar.gz $destpkg
+    cp $i/$i.changes $destpkg/$prefix-$i.changes
+    (cd $destpkg; osc add *$version*.gz)
+    sed -i "s,$oldversion,$version,g" $destpkg/$prefix-$i.spec
+done
