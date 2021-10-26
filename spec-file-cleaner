@@ -1,0 +1,19 @@
+#!/bin/sh
+
+for i in $@; do
+    gawk -i inplace '
+
+# remove brackets from macro calls
+$0 ~ /%\{[a-zA-Z0-9_]+\}/ {
+    $0 = gensub(/%\{([a-zA-Z0-9_]+)\}/, "%\\1", "g", $0);
+}
+
+# remove obsolete tag `BuildRoot:`
+# https://github.com/rpm-software-management/spec-cleaner/issues/195
+$0 ~ /^BuildRoot:/ {
+    getline
+}
+
+{ print $0 }
+    ' $i
+done
