@@ -4,6 +4,25 @@
 #
 # clone a mingw package to the other architecture e.g mingw32->mingw64 and vice versa
 #
+update=0
+inplace=0
+commit=1
+if test "$1" == "--update"; then
+    update=1
+    shift
+fi
+
+if test "$1" == "--update-inplace"; then
+    update=1
+    inplace=1
+    shift
+fi
+
+if test "$1" == "--no-commit"; then
+    commit=0
+    shift
+fi
+
 srcprj=$1
 srcpkg=$2
 
@@ -20,38 +39,61 @@ if ! [[ $srcpkg =~ "32" ]]; then
     dstpat=32
 fi
 
+srcdist=mingw$srcpat
+dstdist=mingw$dstpat
+
 # create names for destination
 dstprj=$(echo $srcprj | sed "s,$srcpat,$dstpat,g")
 dstpkg=$(echo $srcpkg | sed "s,mingw$srcpat,mingw$dstpat,g")
 
-# copy package to destination
-osc copypac $1 $2 $dstprj $dstpkg
-if test "$?" -ne 0; then
-    echo "package exists"
-    exit 1
+if test "$update" -ne 1; then
+    # copy package to destination
+    osc copypac $1 $2 $dstprj $dstpkg
+    if test "$?" -ne 0; then
+        echo "package exists, use --continue to override"
+        exit 1
+    fi
 fi
 
 # checkout package
-cd /tmp
-osc co $dstprj/$dstpkg
-cd $dstprj/$dstpkg
+if test "$inplace" -ne 1; then
+    cd /tmp
+    tmpdir=`basename $0`.$$
+    mkdir -p $tmpdir
+    cd $tmpdir
+    if test -d "$dstprj/$dstpkg"; then
+        osc update $dstprj/$dstpkg
+    else
+        osc co $dstprj/$dstpkg
+    fi
+    cd $dstprj/$dstpkg
+fi
 
 rpl="s,mingw$srcpat,mingw$dstpat,g;s,MINGW$srcpat,MINGW$dstpat,g"
 
-# update file names and content
-if test -f "$srcpkg.changes"; then
-    osc mv $srcpkg.changes $dstpkg.changes
-    sed -i $rpl $dstpkg.changes
-fi
-osc mv $srcpkg.spec $dstpkg.spec
-sed -i $rpl $dstpkg.spec
+# update file names
+for i in $(ls ${srcdist}*spec ${srcdist}*changes ${srcdist}*-rpmlintrc 2>/dev/null); do
+    echo $i
+    outfile=$(echo $i | sed "$rpl")
+    osc mv $i $outfile
+done
+
+# update content
+for i in $(ls ${dstdist}*spec ${dstdist}*changes ${dstdist}*-rpmlintrc _multibuild 2>/dev/null); do
+    echo $i
+    sed -i $rpl $i
+done
 
 # check in applied changes
-osc ci -m "ported to mingw$dstpat"
-if test "$?" -ne 0; then
-    echo "commit failed"
-    exit 1
+if test "$commit" -eq 1; then
+    osc ci -m "ported to mingw$dstpat"
+    if test "$?" -ne 0; then
+        echo "commit failed"
+        exit 1
+    fi
 fi
 
 # cleanup
-rm -rf $dstprj
+if test "$inplace" -ne 1; then
+    rm -rf /tmp/$tmpdir
+fi
