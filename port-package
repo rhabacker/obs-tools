@@ -11,6 +11,8 @@ d=$(dirname $d)
     cd mingw32-$1
     if test -f $1.spec; then
         osc mv $1.spec mingw32-$1.spec
+        $d/patch-mingw32 mingw32-$1.spec > tmp
+        mv tmp mingw32-$1.spec
     fi
     if test -f $1.changes; then
         osc mv $1.changes mingw32-$1.changes
@@ -18,7 +20,5 @@ d=$(dirname $d)
     if test -f $1-rpmlintrc; then
         osc mv $1-rpmlintrc mingw32-$1-rpmlintrc
     fi
-    $d/patch-mingw32 mingw32-$1.spec > tmp
-    mv tmp mingw32-$1.spec
     echo "osc ci -m \"port to mingw32\""
 )
