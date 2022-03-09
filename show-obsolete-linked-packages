@@ -1,0 +1,20 @@
+
+prj=home:rhabacker:branches:windows:mingw:win32
+if test -n "$1"; then
+    prj=$1
+fi
+
+for pkg in $(osc ls $prj); do
+    osc ls $prj $pkg _link 2>&1 >/dev/null
+    if test "$?" -eq 1; then
+        echo "$pkg has no link - skipped"
+        continue
+    fi
+    osc log -r 2 $prj $pkg 2>&1 >/dev/null
+    if test "$?" -eq 1; then
+        echo "$pkg was not changed and could probably be deleted"
+    else
+        echo "$pkg has local modifications"
+    fi
+done
+
