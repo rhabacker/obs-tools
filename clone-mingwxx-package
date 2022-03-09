@@ -23,13 +23,30 @@ if test "$1" == "--no-commit"; then
     shift
 fi
 
+linkpac=0
+linkprj=
+if test "$1" == "--linkpac"; then
+    linkpac=1
+    shift
+    linkprj=$1
+    shift
+fi
+
 srcprj=$1
 srcpkg=$2
 
 if test -z "$1" || test -z "$2"; then
-    echo "$0 <source project> <source package>"
+    echo "$0 [<options>] <source project> <source package>"
+    echo "options:"
+    echo "    --update"
+    echo "    --update-inplace"
+    echo "    --no-commit"
+    echo "    --linkpac <source-project>"
     exit 1
 fi
+
+srcprj=$1
+srcpkg=$2
 
 # set search patterns
 srcpat=32
@@ -48,7 +65,7 @@ dstpkg=$(echo $srcpkg | sed "s,mingw$srcpat,mingw$dstpat,g")
 
 if test "$update" -ne 1; then
     # copy package to destination
-    osc copypac $1 $2 $dstprj $dstpkg
+    osc copypac $srcprj $srcpkg $dstprj $dstpkg
     if test "$?" -ne 0; then
         echo "package exists, use --continue to override"
         exit 1
@@ -89,6 +106,14 @@ if test "$commit" -eq 1; then
     osc ci -m "ported to mingw$dstpat"
     if test "$?" -ne 0; then
         echo "commit failed"
+        exit 1
+    fi
+fi
+
+if test "$linkpac" -eq 1; then
+    osc linkpac $linkprj $dstpkg $dstprj
+    if test "$?" -ne 0; then
+        echo "linking project failed"
         exit 1
     fi
 fi
