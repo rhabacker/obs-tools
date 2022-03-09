@@ -1,0 +1,14 @@
+
+
+tmpfile=/tmp/$$.filelist
+zypper packages | grep mingw32  | grep -v cross > $tmpfile
+
+for i in $(cat); do
+    p=$(echo $i | sed "s,mingw32-,,g;s,\-lp.*$,,g;s,\-[-0-9.].*,,g")
+    q=$(echo $p | sed "s,lib,,g;s,\-devel,,g;s,\-debug,,g;s,[0-9]$,,g")
+    echo "searching for $p"
+    grep $p $tmpfile
+    echo "searching for $q"
+    grep $q $tmpfile
+done
+
