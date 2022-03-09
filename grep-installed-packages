@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# grep installed packages from build log
+#
+if test "$1" == "--file"; then
+    shift
+    in="cat $1"
+else
+    in="osc buildlog $1"
+fi
+
+$in | gawk '$0 ~ /Preparing/ { p = 1; getline } $0 ~ /now finalizing build dir/ { p = 0; exit(0); } p && $4 ~ /######/ { print $3}' | sort
+
