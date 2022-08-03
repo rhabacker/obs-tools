@@ -16,6 +16,17 @@ def is_git_am_file(filename):
         else:
             return False
 
+# extract commit message from string
+def git_message(s):
+    s = s.replace('_', ' ').replace('-', ' ')
+    # remove leading 00..
+    a = s.split()
+    if a[0][0] == '0':
+        a[0] = ''
+    s = ' '.join(a).strip()
+    return s
+
+
 def show_help():
     print("syntax: %s [<options>] <spec-file> [<unpacked tarball>]" % sys.argv[0])
     print("options:")
@@ -111,7 +122,7 @@ for key in patch_order:
         if is_git_am_file(git_file):
             cmdline = "git am %s" % (git_file)
         else:
-            git_msg = os.path.splitext(os.path.basename(git_file))[0].replace('_', ' ').replace('-', ' ')
+            git_msg = git_message(os.path.splitext(os.path.basename(git_file))[0])
             cmdline = "patch %s -i %s; git commit -a -m \"%s\"" % (patches[key]['level'], git_file, git_msg)
     else:
         cmdline = "cd %s; patch %s -i ../%s" % (sys.argv[i+1], patches[key]['level'], patches[key]['file'])
