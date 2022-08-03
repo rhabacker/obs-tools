@@ -65,7 +65,7 @@ dstpkg=$(echo $srcpkg | sed "s,mingw$srcpat,mingw$dstpat,g")
 
 if test "$update" -ne 1; then
     # copy package to destination
-    osc copypac $srcprj $srcpkg $dstprj $dstpkg
+    osc copypac --expand $srcprj $srcpkg $dstprj $dstpkg
     if test "$?" -ne 0; then
         echo "package exists, use --continue to override"
         exit 1
