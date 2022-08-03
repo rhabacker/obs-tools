@@ -16,6 +16,16 @@ def is_git_am_file(filename):
         else:
             return False
 
+def show_help():
+    print("syntax: %s [<options>] <spec-file> [<unpacked tarball>]" % sys.argv[0])
+    print("options:")
+    print("    --dry-run      do not really apply, only show what will be performed")
+    print("    --git          apply patches to current git repository, not to the unpacked tarball specified by second parameter")
+    print("    --help         show this page")
+    print("    --verbose      verbose mode")
+    print("    --start <num>  continue applying with patch <num>")
+    exit(1)
+
 patches = {}
 patch_order = []
 patch_order_def = []
@@ -26,6 +36,9 @@ git = False
 dryrun = False
 verbose = False
 start_key = 0
+
+if len(sys.argv) == 1:
+    show_help()
 
 if sys.argv[i] == '--git':
     git = True
@@ -40,6 +53,9 @@ if sys.argv[i] == '--verbose':
 if sys.argv[i] == '--start':
     start_key = int(sys.argv[i+1])
     i += 2
+
+if sys.argv[i] == '--help':
+    show_help()
 
 filename = sys.argv[i]
 dir = os.path.dirname(filename)
