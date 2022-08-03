@@ -89,14 +89,14 @@ fi
 rpl="s,mingw$srcpat,mingw$dstpat,g;s,MINGW$srcpat,MINGW$dstpat,g"
 
 # update file names
-for i in $(ls ${srcdist}* 2>/dev/null); do
+for i in $(ls *${srcdist}* 2>/dev/null); do
     echo $i
     outfile=$(echo $i | sed "$rpl")
     osc mv $i $outfile
 done
 
 # update content
-for i in $(ls ${dstdist}* _multibuild 2>/dev/null); do
+for i in $(ls *${dstdist}* _multibuild 2>/dev/null); do
     echo $i
     sed -i $rpl $i
 done
