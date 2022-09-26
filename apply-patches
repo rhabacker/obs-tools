@@ -68,11 +68,12 @@ if sys.argv[i] == '--start':
 if sys.argv[i] == '--help':
     show_help()
 
-filename = sys.argv[i]
-dir = os.path.dirname(filename)
-with open(filename) as file:
+spec_filename = sys.argv[i]
+src_dir = sys.argv[i+1]
+dir = os.path.dirname(spec_filename)
+with open(spec_filename) as file:
     if verbose:
-        print('reading from "%s"' % filename)
+        print('reading from "%s"' % spec_filename)
     for line in file:
         l = line.strip()
         m = re.match(r"^Patch(\w+):\s+(.*)$", l)
@@ -125,7 +126,7 @@ for key in patch_order:
             git_msg = git_message(os.path.splitext(os.path.basename(git_file))[0])
             cmdline = "patch %s -i %s; git commit -a -m \"%s\"" % (patches[key]['level'], git_file, git_msg)
     else:
-        cmdline = "cd %s; patch %s -i ../%s" % (sys.argv[i+1], patches[key]['level'], patches[key]['file'])
+        cmdline = "cd %s; patch %s -i ../%s" % (src_dir, patches[key]['level'], patches[key]['file'])
     cmdline = "echo %s; %s" % (key, cmdline)
     print(cmdline)
     if not dryrun:
