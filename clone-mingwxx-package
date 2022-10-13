@@ -32,11 +32,17 @@ if test "$1" == "--linkpac"; then
     shift
 fi
 
-srcprj=$1
-srcpkg=$2
+if [[ "$1" =~ "/" ]]; then
+    srcprj=$(echo $1 | cut -d "/" -f 1)
+    srcpkg=$(echo $1 | cut -d "/" -f 2)
+else
+    srcprj=$1
+    srcpkg=$2
+fi
 
-if test -z "$1" || test -z "$2"; then
+if test -z "$srcprj" || test -z "$srcpkg"; then
     echo "$0 [<options>] <source project> <source package>"
+    echo "$0 [<options>] <source project>/<source package>"
     echo "options:"
     echo "    --update"
     echo "    --update-inplace"
