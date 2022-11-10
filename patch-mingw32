@@ -3,7 +3,10 @@ import sys
 
 # todo frameworkintegration; %if 0%{?suse_version} >= 1330 || (0%{?sle_version} >= 120200 && 0%{?is_opensuse})
 
-target = "mingw32"
+if sys.argv[0].endswith('mingw64'):
+    target = "mingw64"
+else:
+    target = "mingw32"
 
 def getBuildDep(b):
     return "BuildRequires:  %s" % b

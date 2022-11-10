@@ -2,23 +2,28 @@
 #
 # @author Ralf Habacker
 #
-# port native package to mingw32
+# port native package to mingw32|64
 #
 d=$(realpath $0)
 d=$(dirname $d)
 
 (
-    cd mingw32-$1
+    if test -d mingw64-$1; then
+        prefix=mingw64
+    else
+        prefix=mingw32
+    fi
+    cd $prefix-$1
     if test -f $1.spec; then
-        osc mv $1.spec mingw32-$1.spec
-        $d/patch-mingw32 mingw32-$1.spec > tmp
-        mv tmp mingw32-$1.spec
+        osc mv $1.spec $prefix-$1.spec
+        $d/patch-$prefix $prefix-$1.spec > tmp
+        mv tmp $prefix-$1.spec
     fi
     if test -f $1.changes; then
-        osc mv $1.changes mingw32-$1.changes
+        osc mv $1.changes $prefix-$1.changes
     fi
     if test -f $1-rpmlintrc; then
-        osc mv $1-rpmlintrc mingw32-$1-rpmlintrc
+        osc mv $1-rpmlintrc $prefix-$1-rpmlintrc
     fi
-    echo "osc ci -m \"port to mingw32\""
+    echo "osc ci -m \"port to $prefix\""
 )
