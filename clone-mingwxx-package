@@ -57,7 +57,7 @@ srcpkg=$2
 # set search patterns
 srcpat=32
 dstpat=64
-if ! [[ $srcpkg =~ "32" ]]; then
+if ! [[ $srcpkg =~ "mingw32" ]]; then
     srcpat=64
     dstpat=32
 fi
