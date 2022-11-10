@@ -32,7 +32,11 @@ if test "$1" == "--linkpac"; then
     shift
 fi
 
-if [[ "$1" =~ "/" ]]; then
+if [[ "$1" == "." ]]; then
+    srcpkg=$(basename $PWD)
+    srcprj=$(dirname $PWD | sed 's,.*/osc/,,g')
+    echo $srcprj $srcpkg
+elif [[ "$1" =~ "/" ]]; then
     srcprj=$(echo $1 | cut -d "/" -f 1)
     srcpkg=$(echo $1 | cut -d "/" -f 2)
 else
@@ -41,8 +45,9 @@ else
 fi
 
 if test -z "$srcprj" || test -z "$srcpkg"; then
-    echo "$0 [<options>] <source project> <source package>"
-    echo "$0 [<options>] <source project>/<source package>"
+    echo "$0 [<options>] <source project> <source package> clone package <obs-project> <obs-package>"
+    echo "$0 [<options>] <source project>/<source package> clone package from <obs-path>"
+    echo "$0 [<options>] .                                 clone package from current dir"
     echo "options:"
     echo "    --update"
     echo "    --update-inplace"
@@ -50,9 +55,6 @@ if test -z "$srcprj" || test -z "$srcpkg"; then
     echo "    --linkpac <source-project>"
     exit 1
 fi
-
-srcprj=$1
-srcpkg=$2
 
 # set search patterns
 srcpat=32
