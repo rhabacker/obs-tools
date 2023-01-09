@@ -7,23 +7,54 @@
 d=$(realpath $0)
 d=$(dirname $d)
 
+srcprj=$srcpkg
+srcpkg=$2
+cdir=0
+
+if [[ "$3" == "." ]]; then
+    cdir=1
+    dstprj=$(osc meta prj | sed 's,^.*",,g;s,".*$,,g')
+else
+    dstprj=$3
+fi
+if [[ $dstprj =~ "32" ]]; then
+    dstpat=mingw32
+else
+    dstpat=mingw64
+fi
+dstpkg=$dstpat-$srcpkg
+echo $dstprj $dstpkg
+
+if test -z "$srcprj" || test -z "$srcpkg"; then
+    echo "$0 [<options>] <source project> <source package> <destination project>|. port native package from <source-project> <source-package> to <destination project> or current dir"
+    exit 1
+fi
+exit 1
 (
-    if test -d mingw64-$1; then
-        prefix=mingw64
+    osc copypac $srcprj $srcpkg $dstprj $dstpkg
+    if test $? -ne 0; then
+        exit 2
+    fi
+    if test $cdir = "1"; then
+        osc co $dstpkg
     else
-        prefix=mingw32
+        cd ~/osc
+        osc co $dstprj $dstpkg
+        if test $? -ne 0; then
+            exit 3
+        fi
+        cd $_
     fi
-    cd $prefix-$1
-    if test -f $1.spec; then
-        osc mv $1.spec $prefix-$1.spec
-        $d/patch-$prefix $prefix-$1.spec > tmp
-        mv tmp $prefix-$1.spec
+    if test -f $srcpkg.spec; then
+        osc mv $srcpkg.spec $dstpkg.spec
+        $d/patch-$dstpat $dstpkg.spec > tmp
+        mv tmp $dstpkg.spec
     fi
-    if test -f $1.changes; then
-        osc mv $1.changes $prefix-$1.changes
+    if test -f $srcpkg.changes; then
+        osc mv $srcpkg.changes $dstpkg.changes
     fi
-    if test -f $1-rpmlintrc; then
-        osc mv $1-rpmlintrc $prefix-$1-rpmlintrc
+    if test -f $srcpkg-rpmlintrc; then
+        osc mv $srcpkg-rpmlintrc $dstpkg-rpmlintrc
     fi
-    echo "osc ci -m \"port to $prefix\""
+    echo "osc ci -m \"port to $dstpat\""
 )
