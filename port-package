@@ -7,13 +7,13 @@
 d=$(realpath $0)
 d=$(dirname $d)
 
-srcprj=$srcpkg
+srcprj=$1
 srcpkg=$2
 cdir=0
 
 if [[ "$3" == "." ]]; then
     cdir=1
-    dstprj=$(osc meta prj | sed 's,^.*",,g;s,".*$,,g')
+    dstprj=$(osc meta prj | gawk '$0 ~ /project name/ { match($0, /="(.*)"/, a); print a[1] }')
 else
     dstprj=$3
 fi
@@ -26,24 +26,24 @@ dstpkg=$dstpat-$srcpkg
 echo $dstprj $dstpkg
 
 if test -z "$srcprj" || test -z "$srcpkg"; then
-    echo "$0 [<options>] <source project> <source package> <destination project>|. port native package from <source-project> <source-package> to <destination project> or current dir"
+    echo "$0 [<options>] <source project> <source package> <destination project>     port native package from <source-project> <source-package> to <destination project> or current project dir"
     exit 1
 fi
-exit 1
 (
-    osc copypac $srcprj $srcpkg $dstprj $dstpkg
+    osc copypac -e $srcprj $srcpkg $dstprj $dstpkg
     if test $? -ne 0; then
         exit 2
     fi
-    if test $cdir = "1"; then
+    if test $cdir == "1"; then
         osc co $dstpkg
+        cd $dstpkg
     else
         cd ~/osc
         osc co $dstprj $dstpkg
         if test $? -ne 0; then
             exit 3
         fi
-        cd $_
+        cd $dstprj/$dstpkg
     fi
     if test -f $srcpkg.spec; then
         osc mv $srcpkg.spec $dstpkg.spec
