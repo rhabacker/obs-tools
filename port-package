@@ -7,6 +7,12 @@
 d=$(realpath $0)
 d=$(dirname $d)
 
+if test "$1" == "-r"; then
+    shift
+    options="-r $1"
+    shift
+fi
+
 srcprj=$1
 srcpkg=$2
 cdir=0
@@ -30,7 +36,7 @@ if test -z "$srcprj" || test -z "$srcpkg"; then
     exit 1
 fi
 (
-    osc copypac -e $srcprj $srcpkg $dstprj $dstpkg
+    osc copypac $options -e $srcprj $srcpkg $dstprj $dstpkg
     if test $? -ne 0; then
         exit 2
     fi
