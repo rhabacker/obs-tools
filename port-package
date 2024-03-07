@@ -42,6 +42,7 @@ fi
     fi
     if test $cdir == "1"; then
         osc co $dstpkg
+        echo "Entering $dstpkg"
         cd $dstpkg
     else
         cd ~/osc
@@ -49,6 +50,7 @@ fi
         if test $? -ne 0; then
             exit 3
         fi
+        echo "Entering $dstprj/$dstpkg"
         cd $dstprj/$dstpkg
     fi
     if test -f $srcpkg.spec; then
@@ -62,5 +64,6 @@ fi
     if test -f $srcpkg-rpmlintrc; then
         osc mv $srcpkg-rpmlintrc $dstpkg-rpmlintrc
     fi
+    echo "Run the following commit to submit"
     echo "osc ci -m \"port to $dstpat\""
 )
