@@ -17,9 +17,21 @@ srcprj=$1
 srcpkg=$2
 cdir=0
 
+indstprj=0
+indstpkg=0
 if [[ "$3" == "." ]]; then
-    cdir=1
-    dstprj=$(osc meta prj | gawk '$0 ~ /project name/ { match($0, /="(.*)"/, a); print a[1] }')
+    dstprj=$(osc meta prj | grep "^<project" | sed 's,^.*=",,g;s,".*$,,g')
+    if test -n "$dstprj"; then
+        indstprj=1
+    else
+        echo "not in destination project"
+        exit 1
+    fi
+    # check if in destination package
+    dstpkg=$(osc meta pkg | grep '<package' | sed 's,.*name=",,g;s,".*$,,g')
+    if test -n "$dstpkg"; then
+        indstpkg=1
+    fi
 else
     dstprj=$3
 fi
@@ -32,19 +44,32 @@ dstpkg=$dstpat-$srcpkg
 echo $dstprj $dstpkg
 
 if test -z "$srcprj" || test -z "$srcpkg"; then
-    echo "$0 [<options>] <source project> <source package> <destination project>     port native package from <source-project> <source-package> to <destination project> or current project dir"
+    echo "$0 [<options>] <source project> <source package> <destination project>     port native package from <source-project> <source-package> to <destination project>"
+    echo "$0 [<options>] <source project> <source package> .                         port native package from <source-project> <source-package> to osc project or package in current dir"
     exit 1
 fi
+
 (
-    osc copypac $options -e $srcprj $srcpkg $dstprj $dstpkg
-    if test $? -ne 0; then
-        exit 2
+    # check is destination package exists
+    osc meta pkg $dstprj $dstpkg > /dev/null 2>&1
+    if test $? -eq 0; then
+        dstpkgexits=1
+    else
+        osc copypac -e $srcprj $srcpkg $dstprj $dstpkg
+        if test $? -ne 0; then
+            exit 2
+        fi
     fi
-    if test $cdir == "1"; then
+
+    # in destination project
+    if test $indstprj -eq 1; then
         osc co $dstpkg
+        if test $? -ne 0; then
+            exit 2
+        fi
         echo "Entering $dstpkg"
         cd $dstpkg
-    else
+    elif test $indstpkg -ne 1; then
         cd ~/osc
         osc co $dstprj $dstpkg
         if test $? -ne 0; then
@@ -53,6 +78,7 @@ fi
         echo "Entering $dstprj/$dstpkg"
         cd $dstprj/$dstpkg
     fi
+    # port files
     if test -f $srcpkg.spec; then
         osc mv $srcpkg.spec $dstpkg.spec
         $d/patch-$dstpat $dstpkg.spec > tmp
