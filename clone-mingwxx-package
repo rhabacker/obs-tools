@@ -59,9 +59,13 @@ fi
 # set search patterns
 srcpat=32
 dstpat=64
+srctgt=i686-w64-mingw32
+dsttgt=x86_64-w64-mingw32
 if ! [[ $srcpkg =~ "mingw32" ]]; then
     srcpat=64
     dstpat=32
+    srctgt=x86_64-w64-mingw32
+    dsttgt=i686-w64-mingw32
 fi
 
 srcdist=mingw$srcpat
@@ -94,7 +98,7 @@ if test "$inplace" -ne 1; then
     cd $dstprj/$dstpkg
 fi
 
-rpl="s,mingw$srcpat,mingw$dstpat,g;s,MINGW$srcpat,MINGW$dstpat,g"
+rpl="s,$srctgt,$dsttgt,g;s,mingw$srcpat,mingw$dstpat,g;s,MINGW$srcpat,MINGW$dstpat,g"
 
 # update file names
 for i in $(ls *${srcdist}* 2>/dev/null); do
