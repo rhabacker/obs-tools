@@ -75,7 +75,7 @@ dstdist=mingw$dstpat
 dstprj=$(echo $srcprj | sed "s,$srcpat,$dstpat,g")
 dstpkg=$(echo $srcpkg | sed "s,mingw$srcpat,mingw$dstpat,g")
 
-if test "$update" -ne 1; then
+if test "$update" -eq 0; then
     # copy package to destination
     osc copypac --expand $srcprj $srcpkg $dstprj $dstpkg
     if test "$?" -ne 0; then
@@ -85,7 +85,7 @@ if test "$update" -ne 1; then
 fi
 
 # checkout package
-if test "$inplace" -ne 1; then
+if test "$inplace" -eq 0; then
     cd /tmp
     tmpdir=`basename $0`.$$
     mkdir -p $tmpdir
