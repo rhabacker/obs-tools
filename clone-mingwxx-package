@@ -4,41 +4,27 @@
 #
 # clone a mingw package to the other architecture e.g mingw32->mingw64 and vice versa
 #
-update=0
-inplace=0
 commit=1
 dstprj=
-if test "$1" == "--update"; then
-    update=1
-    shift
-fi
-
-if test "$1" == "--update-inplace"; then
-    update=1
-    inplace=1
-    shift
-fi
-
-if test "$1" == "--target-project"; then
-    shift
-    dstprj=$1
-    shift
-fi
-
-if test "$1" == "--no-commit"; then
-    commit=0
-    shift
-fi
-
+inplace=0
 linkpac=0
 linkprj=
-if test "$1" == "--linkpac"; then
-    linkpac=1
-    shift
-    linkprj=$1
-    shift
-fi
+update=0
 
+# Parse options
+while test $# -gt 0; do
+    case "$1" in
+        --update) update=1 ;;
+        --update-inplace) inplace=1 ;;
+        --no-commit) commit=0 ;;
+        --linkpac) linkpac=1; shift; linkprj="$1" ;;
+	--target-project) shift; dstprj="$1" ;;
+        *) break ;;
+    esac
+    shift
+done
+
+# Check is in current dir
 if [[ "$1" == "." ]]; then
     srcpkg=$(basename $PWD)
     srcprj=$(dirname $PWD | sed 's,.*/osc/,,g')
@@ -60,6 +46,7 @@ if test -z "$srcprj" || test -z "$srcpkg"; then
     echo "    --update-inplace"
     echo "    --no-commit"
     echo "    --linkpac <source-project>"
+    echo "    --target-project <target-project> Use the specified target project instead of automatic evaluation"
     exit 1
 fi
 
