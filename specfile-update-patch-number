@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# convert %patchxxx line to %patch -P N # to fix rpmbuild error:
+# %patchN is obsolete, use %patch N (or %patch -P N): %patch2
+#
+gawk -i inplace '
+match($0, /^([[:space:]]*)%patch([0-9]+)([[:space:]]+-R?p[0-9]+)?[[:space:]]*$/, m) {
+    print m[1] "%patch -P " m[2] (m[3] ? m[3] : "")
+    next
+}
+{ print }' $*
