@@ -478,10 +478,10 @@ def scan(args: argparse.Namespace) -> int:
                 f"{r.status}"
             )
 
-    print(f"results: {len(results)}, failures: {len(failures)}")
+        # This must be inside the project loop.
+        all_results.extend(failures)
 
-    for r in failures:
-        all_results.append(r)
+            )
 
     failures: list[Failure] = []
     for r in all_results:
