@@ -460,6 +460,12 @@ def scan(args: argparse.Namespace) -> int:
             args.arch,
         )
 
+        if args.package:
+            results = [
+            r for r in results
+            if r.package == args.package
+        ]
+
         failures = [
             r for r in results
             if r.status in FAILURE_STATUSES
@@ -480,8 +486,6 @@ def scan(args: argparse.Namespace) -> int:
 
         # This must be inside the project loop.
         all_results.extend(failures)
-
-            )
 
     failures: list[Failure] = []
     for r in all_results:
@@ -739,6 +743,11 @@ def make_parser() -> argparse.ArgumentParser:
         "--project",
         action="append",
         help="project to scan; may be repeated (default: both MinGW projects)",
+    )
+    s.add_argument(
+        "package",
+        nargs="?",
+        help="only scan this package",
     )
     s.add_argument("--repo", help="limit to an OBS repository")
     s.add_argument("--arch", help="limit to an architecture")
