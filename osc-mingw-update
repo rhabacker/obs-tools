@@ -1,0 +1,761 @@
+#!/usr/bin/env python3
+"""
+osc-mingw-update
+
+Scan openSUSE Build Service MinGW projects for failed builds, fetch and
+classify build-log errors, correlate failures between architectures, and
+optionally checkout/build/watch individual packages.
+
+Designed for:
+  windows:mingw:win32
+  windows:mingw:win64
+
+Requires:
+  - Python 3.9+
+  - osc configured and authenticated
+  - osc build prerequisites if using the build command
+
+Examples:
+  ./osc-mingw-update scan
+  ./osc-mingw-update scan --project windows:mingw:win32
+  ./osc-mingw-update inspect foo
+  ./osc-mingw-update checkout foo --branch
+  ./osc-mingw-update build foo --repo standard --arch x86_64
+  ./osc-mingw-update watch foo --repo standard --arch x86_64
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from collections import defaultdict
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Iterable, Optional
+
+
+DEFAULT_PROJECTS = [
+    "windows:mingw:win32",
+    "windows:mingw:win64",
+]
+
+DEFAULT_STATE_DIR = Path.home() / ".cache" / "osc-mingw-update"
+
+# Results which should normally be treated as failures requiring inspection.
+FAILURE_STATUSES = {
+    "failed",
+    "broken",
+    "unresolvable",
+    "blocked",
+}
+
+# Things which are failures of OBS/infrastructure rather than source errors.
+INFRA_PATTERNS = [
+    (r"(?i)failed to (?:download|fetch)", "infrastructure/download"),
+    (r"(?i)could not resolve host", "infrastructure/network"),
+    (r"(?i)connection (?:reset|timed out|refused)", "infrastructure/network"),
+    (r"(?i)repository .* unavailable", "infrastructure/repository"),
+    (r"(?i)worker .* (?:died|failed|disconnected)", "infrastructure/worker"),
+    (r"(?i)build host .* unavailable", "infrastructure/worker"),
+    (r"(?i)source service .* failed", "infrastructure/source-service"),
+    (r"(?i)service failed", "infrastructure/source-service"),
+]
+
+# Ordered from more specific to more general.
+ERROR_PATTERNS = [
+    (r"fatal error: .*No such file or directory", "missing header"),
+    (r"fatal error: .*file not found", "missing header"),
+    (r"error: .*no member named", "API/header incompatibility"),
+    (r"error: .*has no member named", "API/header incompatibility"),
+    (r"error: .*undeclared", "API/header incompatibility"),
+    (r"error: .*was not declared in this scope", "API/header incompatibility"),
+    (r"error: .*unknown type name", "API/header incompatibility"),
+    (r"error: .*implicit declaration of function", "C/GCC diagnostic"),
+    (r"error: .*incompatible (?:type|pointer)", "C/GCC diagnostic"),
+    (r"error: .*too few arguments", "API incompatibility"),
+    (r"error: .*too many arguments", "API incompatibility"),
+    (r"error: .*deprecated", "GCC diagnostic"),
+    (r"error: .*unrecognized command-line option", "GCC/toolchain"),
+    (r"error: .*unrecognized option", "GCC/toolchain"),
+    (r"error: .*does not support", "GCC/toolchain"),
+    (r"error: .*not supported", "GCC/toolchain"),
+    (r"undefined reference to", "linker/runtime"),
+    (r"collect2: error", "linker/runtime"),
+    (r"ld returned [0-9]+ exit status", "linker/runtime"),
+    (r"(?i)-Werror", "GCC diagnostic / -Werror"),
+    (r"error:", "compiler error"),
+    (r"fatal error:", "compiler fatal error"),
+]
+
+# GCC source diagnostic forms, e.g.:
+# foo.c:123:17: error: 'X' undeclared
+# foo.cpp:44:5: fatal error: foo.h: No such file or directory
+SOURCE_ERROR_RE = re.compile(
+    r"(?P<file>(?:[A-Za-z]:)?[^:\n]+):(?P<line>\d+)(?::(?P<column>\d+))?:"
+    r"\s*(?P<kind>fatal error|error|warning|note):\s*(?P<message>.*)"
+)
+
+GENERIC_ERROR_RE = re.compile(r"(?i)(?:^|\s)(fatal error|error):\s*(.*)")
+
+
+@dataclass
+class Result:
+    project: str
+    package: str
+    repo: str
+    arch: str
+    status: str
+    raw: str = ""
+
+
+@dataclass
+class Finding:
+    category: str
+    message: str
+    file: str = ""
+    line: str = ""
+    column: str = ""
+    context: str = ""
+
+@dataclass
+class Failure:
+    project: str
+    package: str
+    repo: str
+    arch: str
+    status: str
+    log_file: str
+    findings: list[Finding]
+    fingerprint: str
+
+def die(message: str, code: int = 1) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def run(
+    args: list[str],
+    *,
+    cwd: Optional[Path] = None,
+    check: bool = True,
+    capture: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    if shutil.which(args[0]) is None:
+        die(f"required command not found: {args[0]}")
+    print("$", " ".join(args))
+    return subprocess.run(
+        args,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+        check=check,
+    )
+
+
+def osc(*args: str, cwd: Optional[Path] = None, check: bool = True) -> str:
+    print(f"run 'osc{args}'")
+    p = run(["osc", *args], cwd=cwd, check=check)
+    return p.stdout
+
+
+def ensure_state_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def split_result_line(line: str) -> Optional[Result]:
+    """
+    Accept the common osc prjresults/results CSV forms.
+
+    Current osc exposes --csv for project/package results. The exact number
+    of columns can vary by osc version, so this parser looks for the package,
+    repo, arch and final status rather than relying on fixed column positions.
+    """
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+
+    # osc uses pipe-separated CSV for several commands.
+    try:
+        row = next(csv.reader([line], delimiter="|"))
+    except csv.Error:
+        return None
+
+    row = [x.strip() for x in row]
+    if len(row) < 4:
+        return None
+
+    known_statuses = {
+        "succeeded", "failed", "broken", "unresolvable", "blocked",
+        "building", "scheduled", "excluded", "disabled", "unknown",
+        "finished", "expansion error", "locked", "signing",
+    }
+
+    # Most useful form: package | repo | arch | status
+    for i, value in enumerate(row):
+        if value.lower() in known_statuses:
+            status = value.lower()
+            before = row[:i]
+            # Find architecture and repo among preceding fields.
+            arch_idx = next(
+                (j for j, v in enumerate(before) if re.fullmatch(
+                    r"(?:i[3-6]86|x86_64|aarch64|ppc64le|s390x|armv[5-8]l|[^ ]+)",
+                    v, re.I
+                )),
+                None,
+            )
+            # Prefer the final two fields before status as repo/arch.
+            if len(before) >= 3:
+                package = before[0]
+                repo = before[-2]
+                arch = before[-1]
+                if arch.lower() == status:
+                    continue
+                return Result("", package, repo, arch, status, line)
+
+    # Some versions/outputs are whitespace-separated despite --csv.
+    m = re.match(
+        r"^(?P<pkg>\S+)\s+(?P<repo>\S+)\s+(?P<arch>\S+)\s+(?P<status>\S+)\s*$",
+        line,
+    )
+    if m and m.group("status").lower() in known_statuses:
+        return Result(
+            "",
+            m.group("pkg"),
+            m.group("repo"),
+            m.group("arch"),
+            m.group("status").lower(),
+            line,
+        )
+
+    return None
+
+import xml.etree.ElementTree as ET
+
+def get_project_results_xml(project, repo=None, arch=None):
+    output = osc("results", project, "--xml")
+    root = ET.fromstring(output)
+
+    results = []
+
+    for result in root.findall("result"):
+        repository = result.get("repository", "")
+        result_arch = result.get("arch", "")
+
+        if repo and repository != repo:
+            continue
+        if arch and result_arch != arch:
+            continue
+
+        for status in result.findall("status"):
+            package = status.get("package", "")
+            code = status.get("code", "")
+
+            details_node = status.find("details")
+            details = ""
+
+            if details_node is not None:
+                details = "".join(
+                    details_node.itertext()
+                ).strip()
+
+            results.append(
+                Result(
+                    project=project,
+                    package=package,
+                    repo=repository,
+                    arch=result_arch,
+                    status=code,
+                    raw=details,
+                )
+            )
+
+    return results
+
+
+def classify_text(text: str) -> list[Finding]:
+    findings: list[Finding] = []
+
+    # Infrastructure first.
+    for pattern, category in INFRA_PATTERNS:
+        m = re.search(pattern, text)
+        if m:
+            line = text[max(0, text.rfind("\n", 0, m.start()) + 1):]
+            findings.append(Finding(category, line.strip()))
+
+    lines = text.splitlines()
+
+    for idx, line in enumerate(lines):
+        m = SOURCE_ERROR_RE.search(line)
+        if not m:
+            continue
+
+        kind = m.group("kind")
+        msg = m.group("message").strip()
+        category = "compiler warning" if kind == "warning" else "compiler error"
+
+        for pattern, candidate in ERROR_PATTERNS:
+            if re.search(pattern, line):
+                category = candidate
+                break
+
+        context = "\n".join(lines[max(0, idx - 3):min(len(lines), idx + 4)])
+        findings.append(
+            Finding(
+                category=category,
+                message=msg,
+                file=m.group("file"),
+                line=m.group("line"),
+                column=m.group("column") or "",
+                context=context,
+            )
+        )
+
+    # Also catch non-source-form errors.
+    if not findings:
+        for idx, line in enumerate(lines):
+            m = GENERIC_ERROR_RE.search(line)
+            if not m:
+                continue
+            msg = m.group(2).strip()
+            category = "compiler error"
+            for pattern, candidate in ERROR_PATTERNS:
+                if re.search(pattern, line):
+                    category = candidate
+                    break
+            context = "\n".join(lines[max(0, idx - 3):min(len(lines), idx + 4)])
+            findings.append(Finding(category, msg, context=context))
+
+    # Linker messages often do not contain "error:".
+    for idx, line in enumerate(lines):
+        if re.search(r"undefined reference to|collect2: error|ld returned", line):
+            context = "\n".join(lines[max(0, idx - 3):min(len(lines), idx + 4)])
+            findings.append(Finding("linker/runtime", line.strip(), context=context))
+
+    # De-duplicate.
+    seen = set()
+    unique: list[Finding] = []
+    for f in findings:
+        key = (f.category, f.message, f.file, f.line)
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    return unique[:20]
+
+
+def fingerprint(findings: Iterable[Finding]) -> str:
+    material = "\n".join(
+        f"{f.category}|{f.file}|{f.line}|{f.message}"
+        for f in findings[:5]
+    )
+    return hashlib.sha256(material.encode()).hexdigest()[:12]
+
+
+def fetch_failure(
+    result: Result,
+    state_dir: Path,
+    *,
+    tail: bool = True,
+) -> Failure:
+    log_dir = state_dir / "logs" / result.project / result.package / result.repo / result.arch
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "build.log"
+
+    command = "buildlogtail" if tail else "buildlog"
+    output = osc(
+        command,
+        result.project,
+        result.package,
+        result.repo,
+        result.arch,
+        check=False,
+    )
+
+    log_path.write_text(output, encoding="utf-8", errors="replace")
+    findings = classify_text(output)
+
+    return Failure(
+        project=result.project,
+        package=result.package,
+        repo=result.repo,
+        arch=result.arch,
+        status=result.status,
+        log_file=str(log_path),
+        findings=findings,
+        fingerprint=fingerprint(findings),
+    )
+
+
+def scan(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    ensure_state_dir(state)
+
+    projects = args.project or DEFAULT_PROJECTS
+    all_results: list[Result] = []
+
+    for project in projects:
+        print(f"\n== {project} ==")
+
+        results = get_project_results_xml(
+            project,
+            args.repo,
+            args.arch,
+        )
+
+        failures = [
+            r for r in results
+            if r.status in FAILURE_STATUSES
+        ]
+
+        print(
+            f"results: {len(results)}, "
+            f"failures: {len(failures)}"
+        )
+
+        for r in failures:
+            print(
+                f"  {r.package:40} "
+                f"{r.repo:35} "
+                f"{r.arch:8} "
+                f"{r.status}"
+            )
+
+    print(f"results: {len(results)}, failures: {len(failures)}")
+
+    for r in failures:
+        all_results.append(r)
+
+    failures: list[Failure] = []
+    for r in all_results:
+        print(f"\n--- {r.project} / {r.package} / {r.repo} / {r.arch} ---")
+        try:
+            f = fetch_failure(r, state, tail=not args.full_log)
+        except subprocess.CalledProcessError as e:
+            print(f"could not fetch log: {e.stderr or e}", file=sys.stderr)
+            continue
+        failures.append(f)
+        print_failure(f)
+
+    # Persist machine-readable state.
+    state_file = state / "last-scan.json"
+    state_file.write_text(
+        json.dumps([asdict(f) for f in failures], indent=2),
+        encoding="utf-8",
+    )
+
+    print_correlated_report(failures)
+    print(f"\nSaved scan state to {state_file}")
+    return 0
+
+
+def print_failure(f: Failure) -> None:
+    print(f"status: {f.status}")
+    if not f.findings:
+        print("  no compiler diagnostic detected")
+        print(f"  log: {f.log_file}")
+        return
+
+    for finding in f.findings[:5]:
+        location = finding.file
+        if finding.line:
+            location += f":{finding.line}"
+            if finding.column:
+                location += f":{finding.column}"
+        prefix = f"  {location}: " if location else "  "
+        print(f"{prefix}{finding.category}: {finding.message}")
+
+
+def print_correlated_report(failures: list[Failure]) -> None:
+    groups: dict[tuple[str, str, str, str], list[Failure]] = defaultdict(list)
+
+    for f in failures:
+        fp = f.fingerprint
+        groups[(f.package, f.repo, fp, f.status)].append(f)
+
+    print("\n" + "=" * 72)
+    print("CORRELATED FAILURES")
+    print("=" * 72)
+
+    for (package, repo, fp, status), items in sorted(groups.items()):
+        arches = ", ".join(sorted({x.arch for x in items}))
+        first = items[0]
+        finding = first.findings[0] if first.findings else None
+        print(f"\n{package}  [{repo}]  {status}")
+        print(f"  architectures: {arches}")
+        print(f"  fingerprint:   {fp}")
+        if finding:
+            print(f"  category:      {finding.category}")
+            if finding.file:
+                print(f"  location:      {finding.file}:{finding.line}")
+            print(f"  error:         {finding.message}")
+        print("  action:         inspect source and prepare patch")
+
+
+def find_package_path(package: str, project: Optional[str] = None) -> Path:
+    cwd = Path.cwd()
+
+    # Prefer an exact package working copy.
+    candidates = [
+        cwd / package,
+        cwd / (project or "") / package,
+    ]
+    for candidate in candidates:
+        if (candidate / ".osc").is_dir():
+            return candidate
+
+    # Current directory may itself be a package checkout.
+    if (cwd / ".osc").is_dir():
+        return cwd
+
+    die(
+        f"cannot find package checkout for {package}; "
+        "run 'checkout' first or use --path"
+    )
+    raise AssertionError
+
+
+def checkout(args: argparse.Namespace) -> int:
+    project = args.project
+    package = args.package
+
+    if args.branch:
+        cmd = ["bco", project, package]
+        if args.revision:
+            cmd += ["--revision", args.revision]
+        run(cmd, cwd=Path(args.output_dir) if args.output_dir else None, capture=False)
+    else:
+        cmd = ["co", project, package]
+        if args.revision:
+            cmd += ["--revision", args.revision]
+        if args.output_dir:
+            cmd += ["--output-dir", args.output_dir]
+        run(cmd, capture=False)
+
+    print("\nCheckout complete.")
+    print("Next:")
+    print(f"  cd <checkout> && osc status && osc diff")
+    print(f"  cd <checkout> && osc build <repo> <arch>")
+    return 0
+
+
+def build(args: argparse.Namespace) -> int:
+    package_path = Path(args.path).expanduser() if args.path else find_package_path(
+        args.package, args.project
+    )
+
+    if args.repo and args.arch:
+        cmd = ["build", args.repo, args.arch]
+    elif args.repo:
+        cmd = ["build", args.repo]
+    elif args.arch:
+        cmd = ["build", args.arch]
+    else:
+        cmd = ["build"]
+
+    if args.clean:
+        cmd.append("--clean")
+
+    result = run(cmd, cwd=package_path, capture=False, check=False)
+    print("\nLocal build exit status:", result.returncode)
+
+    # osc localbuildlog is useful after a failed local build.
+    if result.returncode != 0:
+        print("\nLast local build log:")
+        p = run(["osc", "lbl"], cwd=package_path, check=False)
+        print(p.stdout[-12000:])
+
+    return result.returncode
+
+
+def inspect(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    ensure_state_dir(state)
+
+    projects = args.project or DEFAULT_PROJECTS
+    found = False
+
+    for project in projects:
+        results = get_project_results(project, args.repo, args.arch)
+        for r in results:
+            if r.package != args.package:
+                continue
+            found = True
+            print(f"\n{project} / {r.package} / {r.repo} / {r.arch}: {r.status}")
+            if r.status in FAILURE_STATUSES:
+                f = fetch_failure(r, state, tail=not args.full_log)
+                print_failure(f)
+
+    if not found:
+        print(f"package {args.package!r} not found in selected results")
+        return 2
+    return 0
+
+
+def status(args: argparse.Namespace) -> int:
+    state_file = Path(args.state_dir).expanduser() / "last-scan.json"
+    if not state_file.exists():
+        print("no previous scan")
+        return 0
+
+    failures = json.loads(state_file.read_text(encoding="utf-8"))
+    print(f"last scan contains {len(failures)} failed result(s)")
+    for f in failures:
+        finding = f["findings"][0] if f["findings"] else None
+        message = finding["message"] if finding else "no diagnostic"
+        print(
+            f"{f['project']} {f['package']} "
+            f"{f['repo']} {f['arch']} {f['status']}: {message}"
+        )
+    return 0
+
+
+def watch(args: argparse.Namespace) -> int:
+    project = args.project
+    package = args.package
+    repo = args.repo
+    arch = args.arch
+
+    while True:
+        try:
+            results = get_project_results(project, repo, arch)
+        except subprocess.CalledProcessError as e:
+            print(e.stderr or str(e), file=sys.stderr)
+            return 2
+
+        matches = [
+            r for r in results
+            if r.package == package
+            and (not repo or r.repo == repo)
+            and (not arch or r.arch == arch)
+        ]
+
+        if not matches:
+            print("package/result not found")
+            return 2
+
+        done = True
+        for r in matches:
+            print(f"{r.package} {r.repo} {r.arch}: {r.status}")
+            if r.status in {"building", "scheduled", "unknown"}:
+                done = False
+
+        if done:
+            print("\nBuild no longer in progress.")
+            for r in matches:
+                if r.status in FAILURE_STATUSES:
+                    print(f"\nFailure log for {r.repo}/{r.arch}:")
+                    f = fetch_failure(
+                        r,
+                        Path(args.state_dir).expanduser(),
+                        tail=True,
+                    )
+                    print_failure(f)
+            return 0
+
+        time.sleep(args.interval)
+
+
+def make_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Automate MinGW OBS failure discovery and validation with osc."
+    )
+    p.add_argument(
+        "--state-dir",
+        default=str(DEFAULT_STATE_DIR),
+        help=f"state/log directory (default: {DEFAULT_STATE_DIR})",
+    )
+
+    sub = p.add_subparsers(dest="command", required=True)
+
+    s = sub.add_parser("scan", help="scan projects and inspect failed builds")
+    s.add_argument(
+        "--project",
+        action="append",
+        help="project to scan; may be repeated (default: both MinGW projects)",
+    )
+    s.add_argument("--repo", help="limit to an OBS repository")
+    s.add_argument("--arch", help="limit to an architecture")
+    s.add_argument(
+        "--full-log",
+        action="store_true",
+        help="fetch complete logs instead of buildlogtail",
+    )
+    s.set_defaults(func=scan)
+
+    i = sub.add_parser("inspect", help="inspect one package's current failures")
+    i.add_argument("package")
+    i.add_argument(
+        "--project",
+        action="append",
+        help="project to inspect; may be repeated",
+    )
+    i.add_argument("--repo")
+    i.add_argument("--arch")
+    i.add_argument("--full-log", action="store_true")
+    i.set_defaults(func=inspect)
+
+    c = sub.add_parser("checkout", help="checkout or branch a package")
+    c.add_argument("package")
+    c.add_argument(
+        "--project",
+        required=True,
+        help="source OBS project",
+    )
+    c.add_argument(
+        "--branch",
+        action="store_true",
+        help="use 'osc bco' instead of a plain checkout",
+    )
+    c.add_argument("--revision")
+    c.add_argument("--output-dir")
+    c.set_defaults(func=checkout)
+
+    b = sub.add_parser("build", help="run an osc local build")
+    b.add_argument("package", nargs="?")
+    b.add_argument("--project")
+    b.add_argument("--path")
+    b.add_argument("--repo")
+    b.add_argument("--arch")
+    b.add_argument("--clean", action="store_true")
+    b.set_defaults(func=build)
+
+    w = sub.add_parser("watch", help="wait for an OBS build to finish")
+    w.add_argument("package")
+    w.add_argument("--project", required=True)
+    w.add_argument("--repo", required=True)
+    w.add_argument("--arch", required=True)
+    w.add_argument("--interval", type=int, default=30)
+    w.set_defaults(func=watch)
+
+    st = sub.add_parser("status", help="show the last scan")
+    st.set_defaults(func=status)
+
+    return p
+
+
+def main() -> int:
+    parser = make_parser()
+    args = parser.parse_args()
+
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
+    except subprocess.CalledProcessError as e:
+        if e.stderr:
+            print(e.stderr, file=sys.stderr)
+        return e.returncode or 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
