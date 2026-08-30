@@ -366,22 +366,71 @@ def fetch_failure(
     *,
     tail: bool = True,
 ) -> Failure:
-    log_dir = state_dir / "logs" / result.project / result.package / result.repo / result.arch
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "build.log"
 
-    command = "buildlogtail" if tail else "buildlog"
-    output = osc(
-        command,
-        result.project,
-        result.package,
-        result.repo,
-        result.arch,
-        check=False,
-    )
+    log_path = ''
 
-    log_path.write_text(output, encoding="utf-8", errors="replace")
-    findings = classify_text(output)
+    # An unresolvable package has normally not reached the build stage.
+    # Therefore there is no compiler build log to analyse.  OBS puts the
+    # actual reason (missing/conflicting dependencies) into the result's
+    # "details" field.
+    if result.status == "unresolvable":
+        message = result.raw.strip()
+        if not message:
+            message = "package dependencies could not be resolved"
+
+        findings = [
+            Finding(
+                category="dependency resolution",
+                message=message,
+            )
+        ]
+
+    elif result.status == "blocked":
+        # No build log is expected; another package is holding this one back.
+
+        message = result.raw.strip()
+        if not message:
+            message = "package is blocked by another package"
+
+        findings = [
+            Finding(
+                category="package blocked",
+                message=message,
+            )
+        ]
+
+    elif result.status == "broken":
+        # This may have useful result details, but is not necessarily
+
+        message = result.raw.strip()
+        if not message:
+            message = "package is broken and cannot be build"
+
+        findings = [
+            Finding(
+                category="package broken",
+                message=message,
+            )
+        ]
+
+    else:
+        # a compiler failure.
+        log_dir = state_dir / "logs" / result.project / result.package / result.repo / result.arch
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "build.log"
+
+        command = "buildlogtail" if tail else "buildlog"
+        output = osc(
+            command,
+            result.project,
+            result.package,
+            result.repo,
+            result.arch,
+            check=False,
+        )
+
+        log_path.write_text(output, encoding="utf-8", errors="replace")
+        findings = classify_text(output)
 
     return Failure(
         project=result.project,
@@ -459,19 +508,28 @@ def scan(args: argparse.Namespace) -> int:
 
 def print_failure(f: Failure) -> None:
     print(f"status: {f.status}")
+
     if not f.findings:
-        print("  no compiler diagnostic detected")
-        print(f"  log: {f.log_file}")
+        if f.status == "unresolvable":
+            print("  dependency resolution failed; no compiler log exists")
+        else:
+            print("  no compiler diagnostic detected")
+
+        if f.log_file:
+            print(f"  log: {f.log_file}")
         return
 
-    for finding in f.findings[:5]:
-        location = finding.file
-        if finding.line:
-            location += f":{finding.line}"
+    for finding in f.findings:
+        location = ""
+        if finding.file:
+            location = f"{finding.file}:{finding.line}"
             if finding.column:
                 location += f":{finding.column}"
-        prefix = f"  {location}: " if location else "  "
-        print(f"{prefix}{finding.category}: {finding.message}")
+
+        if location:
+            print(f"  {finding.category}: {location}: {finding.message}")
+        else:
+            print(f"  {finding.category}: {finding.message}")
 
 
 def print_correlated_report(failures: list[Failure]) -> None:
@@ -484,7 +542,7 @@ def print_correlated_report(failures: list[Failure]) -> None:
     print("\n" + "=" * 72)
     print("CORRELATED FAILURES")
     print("=" * 72)
-
+    
     for (package, repo, fp, status), items in sorted(groups.items()):
         arches = ", ".join(sorted({x.arch for x in items}))
         first = items[0]
